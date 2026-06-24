@@ -1,0 +1,4 @@
+# Runtime AI keys for `wrangler dev`. Copy to .dev.vars (gitignored) and fill in.
+OPENAI_API_KEY="sk-..."
+# Optional, enables real multi-provider routing:
+OPENROUTER_API_KEY="sk-or-..."

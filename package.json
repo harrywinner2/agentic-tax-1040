@@ -4,10 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "sync-assets": "bash scripts/sync-assets.sh",
+    "predev": "npm run sync-assets",
     "dev": "wrangler dev",
+    "predeploy": "npm run sync-assets",
     "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 execute tax1040 --local --file=schema.sql",
+    "db:remote": "wrangler d1 execute tax1040 --remote --file=schema.sql",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval": "tsx test/eval/run-eval.ts"
   },
   "dependencies": {
     "hono": "^4.12.27",

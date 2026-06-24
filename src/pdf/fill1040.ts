@@ -61,7 +61,7 @@ export async function fill1040(
     cb.check();
     for (const w of cb.acroField.getWidgets()) {
       const r = w.getRectangle();
-      let page = pages[0];
+      let page = pages[0]!;
       for (const p of pages) if (p.ref === w.P()) page = p;
       page.drawText('X', {
         x: r.x + r.width / 2 - 3,

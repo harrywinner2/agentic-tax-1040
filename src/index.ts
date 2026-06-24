@@ -1,0 +1,127 @@
+/**
+ * Cloudflare Worker entrypoint. /api/* is the agent API; everything else is
+ * served from the static-assets binding (the chat UI + the sample W-2 + the
+ * blank form template the filler reads at runtime).
+ */
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import type { Env, ChatMessage } from './types';
+import { loadSession, saveSession } from './session/store';
+import { runTurn } from './agent/loop';
+import { readTrace } from './observability/trace';
+import { hasAnyProvider } from './agent/providers';
+import { computeReturn } from './tax/engine';
+import { fill1040 } from './pdf/fill1040';
+
+const app = new Hono<{ Bindings: Env }>();
+app.use('/api/*', cors());
+
+app.get('/api/health', (c) =>
+  c.json({ ok: true, providerConfigured: hasAnyProvider(c.env), taxYear: 2025 })
+);
+
+/** Main chat loop endpoint. */
+app.post('/api/chat', async (c) => {
+  const body = await c.req.json<{ sessionId?: string; message?: string; image?: string }>();
+  const sessionId = (body.sessionId || crypto.randomUUID()).slice(0, 64);
+  const userText = (body.message ?? '').toString();
+
+  if (!hasAnyProvider(c.env)) {
+    return c.json(
+      { error: 'No AI provider configured. Set OPENAI_API_KEY (or OPENROUTER_API_KEY) as a Worker secret.' },
+      503
+    );
+  }
+
+  const { state, messages, turn } = await loadSession(c.env.DB, sessionId);
+  const nextTurn = turn + 1;
+
+  const out = await runTurn({
+    env: c.env,
+    state,
+    history: messages,
+    userText,
+    pendingImage: body.image,
+    turn: nextTurn,
+  });
+
+  const now = Date.now();
+  const newMessages: ChatMessage[] = [
+    ...messages,
+    { role: 'user', content: userText, ts: now },
+    { role: 'assistant', content: out.assistant, ts: now },
+  ];
+
+  await saveSession(c.env.DB, out.state, newMessages, nextTurn);
+  await out.tracer.flush(c.env.DB);
+
+  return c.json({
+    sessionId,
+    assistant: out.assistant,
+    stage: out.state.stage,
+    questionsAsked: out.state.questionsAsked,
+    formReady: Boolean(out.state.formReady),
+    summary: {
+      wages: out.state.w2.box1_wages ?? null,
+      withholding: out.state.w2.box2_federalWithholding ?? null,
+      filingStatus: out.state.filingStatus ?? null,
+      refundOrOwe: out.state.result?.refundOrOwe ?? null,
+    },
+    trace: out.tracer.list(),
+  });
+});
+
+/** Download the completed 1040 — regenerated deterministically from state. */
+app.get('/api/form/:sessionId', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const { state } = await loadSession(c.env.DB, sessionId);
+  if (!state.result || !state.formReady) {
+    return c.json({ error: 'No completed form yet for this session.' }, 404);
+  }
+  const formRes = await c.env.ASSETS.fetch('https://assets.local/forms/f1040_2025.pdf');
+  const blank = await formRes.arrayBuffer();
+
+  // Recompute to be safe, then fill.
+  const result = computeReturn({
+    filingStatus: state.filingStatus!,
+    wages: state.w2.box1_wages!,
+    federalWithholding: state.w2.box2_federalWithholding!,
+  });
+  const name = (state.w2.employeeName ?? 'Taxpayer Sample').trim();
+  const parts = name.split(/\s+/);
+  const pdf = await fill1040(blank, result, {
+    firstNameMI: parts.length > 1 ? parts.slice(0, -1).join(' ') : name,
+    lastName: parts.length > 1 ? parts[parts.length - 1]! : name,
+    ssn: state.w2.ssn ?? '',
+    address: state.w2.address,
+    city: state.w2.city,
+    state: state.w2.state,
+    zip: state.w2.zip,
+  });
+
+  return new Response(pdf, {
+    headers: {
+      'content-type': 'application/pdf',
+      'content-disposition': `attachment; filename="Form1040-2025-${sessionId.slice(0, 8)}.pdf"`,
+    },
+  });
+});
+
+/** Observability: full trace + rolled-up metrics for a session. */
+app.get('/api/trace/:sessionId', async (c) => {
+  const { events, summary } = await readTrace(c.env.DB, c.req.param('sessionId'));
+  return c.json({ summary, events });
+});
+
+/** The sample W-2 as a data URL, so the UI's "use sample" button can submit it. */
+app.get('/api/sample-w2', async (c) => {
+  const res = await c.env.ASSETS.fetch('https://assets.local/fixtures/w2_sample.png');
+  const buf = await res.arrayBuffer();
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  return c.json({ dataUrl: `data:image/png;base64,${b64}` });
+});
+
+// Static assets (UI, fixtures, blank form) for everything else.
+app.all('*', async (c) => c.env.ASSETS.fetch(c.req.raw));
+
+export default app;

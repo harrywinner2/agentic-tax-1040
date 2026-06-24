@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tilly — 2025 Form 1040 helper</title>
+    <style>
+      :root {
+        --bg: #0f1115; --panel: #171a21; --line: #262b36; --ink: #e7e9ee;
+        --muted: #9aa3b2; --me: #243044; --bot: #1d2330;
+        --accent: #5b8cff; --ok: #3ecf8e; --warn: #f5b14c; --block: #ff6b6b;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--ink);
+        font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      .wrap { display: grid; grid-template-columns: 1fr 360px; gap: 0; height: 100vh; }
+      @media (max-width: 880px) { .wrap { grid-template-columns: 1fr; } .obs { display: none; } }
+      header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex;
+        align-items: baseline; gap: 10px; }
+      header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+      header .sub { color: var(--muted); font-size: 12.5px; }
+      .col { display: flex; flex-direction: column; min-height: 0; }
+      .chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+      .msg { max-width: 78%; padding: 10px 13px; border-radius: 13px; white-space: pre-wrap; }
+      .msg.user { align-self: flex-end; background: var(--me); border-bottom-right-radius: 4px; }
+      .msg.bot { align-self: flex-start; background: var(--bot); border-bottom-left-radius: 4px; }
+      .msg.sys { align-self: center; color: var(--muted); font-size: 12.5px; background: transparent; }
+      .composer { border-top: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      textarea { flex: 1; resize: none; background: var(--panel); color: var(--ink);
+        border: 1px solid var(--line); border-radius: 10px; padding: 10px; font: inherit; min-height: 44px; }
+      button { background: var(--accent); color: white; border: 0; border-radius: 10px;
+        padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+      button.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); font-weight: 500; }
+      button:disabled { opacity: .5; cursor: default; }
+      .pill { font-size: 12px; color: var(--muted); }
+      .attach { font-size: 12.5px; color: var(--muted); }
+      .dl { background: var(--ok); }
+      .obs { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 14px; }
+      .obs h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+      .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+      .metric { background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
+      .metric .k { font-size: 11px; color: var(--muted); }
+      .metric .v { font-size: 16px; font-weight: 650; }
+      .ev { font-size: 12px; border-left: 2px solid var(--line); padding: 3px 0 3px 9px; margin-bottom: 7px; color: var(--muted); }
+      .ev b { color: var(--ink); font-weight: 600; }
+      .ev .tag { font-size: 10px; padding: 1px 6px; border-radius: 6px; margin-left: 6px; }
+      .tag.pass, .tag.ok { background: rgba(62,207,142,.16); color: var(--ok); }
+      .tag.warn { background: rgba(245,177,76,.16); color: var(--warn); }
+      .tag.block, .tag.error { background: rgba(255,107,107,.16); color: var(--block); }
+      .tag.model_call { background: rgba(91,140,255,.16); color: var(--accent); }
+      code { color: #cdd6e6; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="col">
+        <header>
+          <h1>Tilly</h1>
+          <span class="sub">a friendly helper for a simple 2025 Form 1040 · educational demo, not tax advice</span>
+        </header>
+        <div class="chat" id="chat"></div>
+        <div class="composer">
+          <div class="row">
+            <textarea id="input" placeholder="Say hi, upload your W-2, or ask a question…"></textarea>
+            <button id="send">Send</button>
+          </div>
+          <div class="row">
+            <input type="file" id="file" accept="image/*,.pdf" style="display:none" />
+            <button class="ghost" id="attach">📎 Upload W-2</button>
+            <button class="ghost" id="sample">Use sample W-2</button>
+            <button class="dl" id="download" style="display:none">⬇ Download 1040</button>
+            <span class="attach" id="attachName"></span>
+            <span class="pill" id="qbudget" style="margin-left:auto"></span>
+          </div>
+        </div>
+      </div>
+      <div class="obs" id="obs">
+        <h2>Observation trail</h2>
+        <div class="metrics" id="metrics"></div>
+        <div id="events"></div>
+      </div>
+    </div>
+
+    <script>
+      const sessionId = crypto.randomUUID();
+      let pendingImage = null;
+      const allEvents = [];
+      const $ = (id) => document.getElementById(id);
+
+      function add(role, text) {
+        const d = document.createElement('div');
+        d.className = 'msg ' + role;
+        d.textContent = text;
+        $('chat').appendChild(d);
+        $('chat').scrollTop = $('chat').scrollHeight;
+        return d;
+      }
+
+      function renderObs(summary) {
+        if (summary) {
+          $('metrics').innerHTML = '';
+          const m = [
+            ['Cost', '$' + (summary.totalCostUsd || 0).toFixed(5)],
+            ['Latency', Math.round(summary.totalLatencyMs || 0) + ' ms'],
+            ['Model calls', summary.modelCalls || 0],
+            ['Tool calls', summary.toolCalls || 0],
+            ['Guard blocks', summary.guardrailBlocks || 0],
+            ['Providers', Object.keys(summary.providers || {}).join(', ') || '—'],
+          ];
+          for (const [k, v] of m) {
+            const el = document.createElement('div');
+            el.className = 'metric';
+            el.innerHTML = `<div class="k">${k}</div><div class="v">${v}</div>`;
+            $('metrics').appendChild(el);
+          }
+        }
+        const box = $('events');
+        box.innerHTML = '';
+        for (const e of allEvents.slice(-40)) {
+          const el = document.createElement('div');
+          el.className = 'ev';
+          const tag = e.status || e.type;
+          const extra = e.type === 'model_call'
+            ? ` · ${e.latencyMs}ms · $${(e.costUsd || 0).toFixed(5)}`
+            : (e.latencyMs ? ` · ${e.latencyMs}ms` : '');
+          el.innerHTML = `<b>${e.type}</b>:${e.label ? ' ' + e.label : ''}<span class="tag ${tag}">${tag}</span>${extra}` +
+            (e.detail ? `<br><code>${escapeHtml(e.detail)}</code>` : '');
+          box.appendChild(el);
+        }
+      }
+      function escapeHtml(s) { return (s || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
+
+      async function send(text) {
+        $('send').disabled = true;
+        const typing = add('bot', '…');
+        try {
+          const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionId, message: text, image: pendingImage }),
+          });
+          pendingImage = null; $('attachName').textContent = '';
+          const data = await res.json();
+          typing.remove();
+          if (data.error) { add('sys', '⚠ ' + data.error); return; }
+          add('bot', data.assistant);
+          (data.trace || []).forEach((e) => allEvents.push(e));
+          const tr = await fetch('/api/trace/' + sessionId).then((r) => r.json());
+          renderObs(tr.summary);
+          $('qbudget').textContent = `questions: ${data.questionsAsked}/5`;
+          if (data.formReady) $('download').style.display = '';
+        } catch (e) {
+          typing.remove(); add('sys', '⚠ network error');
+        } finally {
+          $('send').disabled = false;
+        }
+      }
+
+      $('send').onclick = () => {
+        const t = $('input').value.trim();
+        if (!t && !pendingImage) return;
+        if (t) add('user', t);
+        else add('user', '(uploaded a W-2)');
+        $('input').value = '';
+        send(t || "Here's my W-2.");
+      };
+      $('input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('send').click(); }
+      });
+      $('attach').onclick = () => $('file').click();
+      $('file').onchange = (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        const reader = new FileReader();
+        reader.onload = () => { pendingImage = reader.result; $('attachName').textContent = '✓ ' + f.name; };
+        reader.readAsDataURL(f);
+      };
+      $('sample').onclick = async () => {
+        $('sample').disabled = true;
+        const { dataUrl } = await fetch('/api/sample-w2').then((r) => r.json());
+        pendingImage = dataUrl; $('attachName').textContent = '✓ sample W-2 attached';
+        $('sample').disabled = false;
+      };
+      $('download').onclick = () => window.open('/api/form/' + sessionId, '_blank');
+
+      // Kick off with a greeting from the agent.
+      send('Hi');
+    </script>
+  </body>
+</html>

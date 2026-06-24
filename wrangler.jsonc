@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agentic-tax-1040",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tax1040",
+      "database_id": "6bbf556a-6bf6-4b50-b99f-435b201af119"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
