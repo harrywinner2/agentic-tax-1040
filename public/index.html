@@ -183,6 +183,15 @@
       };
       $('download').onclick = () => window.open('/api/form/' + sessionId, '_blank');
 
+      // Show the latest eval pass-rate in the observation panel.
+      fetch('/api/eval').then((r) => r.json()).then((e) => {
+        if (!e || e.error) return;
+        const el = document.createElement('div');
+        el.className = 'metric';
+        el.innerHTML = `<div class="k">Eval pass rate</div><div class="v">${e.passRate}% <span style="font-size:11px;color:var(--muted)">(${e.passed}/${e.total})</span></div>`;
+        $('metrics').appendChild(el);
+      }).catch(() => {});
+
       // Kick off with a greeting from the agent.
       send('Hi');
     </script>
