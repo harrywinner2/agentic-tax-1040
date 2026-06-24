@@ -33,3 +33,8 @@ One line per meaningful decision or phase transition. Read this instead of being
 - Secrets set via `wrangler secret put` (from gitignored .dev.vars); secret_guard clean before every push/deploy.
 - Wrote DECISIONS.md and a human README.md.
 - 25 unit tests + live eval all green; tsc clean.
+
+## Phase 5 — demo video
+- Recorded the REAL live UI flow with Playwright (cached chromium), narrated with OpenAI TTS, stitched with ffmpeg via the skill's assemble_video.sh.
+- demo/demo.mp4: ~2 min, 1080p, h264+aac. Shows the live walkthrough (sample W-2 -> vision -> filing status -> refund -> download) with the observation trail (both providers) on screen, plus title/pillars/closing cards.
+- Note: no headless-browser MCP was connected, but Playwright was available locally, so the live-capture step was NOT degraded.
