@@ -23,3 +23,13 @@ One line per meaningful decision or phase transition. Read this instead of being
 - OpenAI API key (runtime) — required to run the live agent loop end-to-end and deploy.
 - OpenRouter API key (optional) — enables real multi-provider routing/fallback.
 - Attachments folder (or "none").
+
+## Phase 4 complete — live & verified
+- Deployed to Cloudflare Workers: https://agentic-tax-1040.harrywinner.workers.dev
+- Live end-to-end verified: greeting → sample W-2 vision extract → filing status → compute → download. 1 question used. Correct refund ($765 for the sample).
+- Multi-provider routing visible in trace: OpenRouter served vision, OpenAI served chat (with mutual fallback).
+- Fixed: vision now reads the EMPLOYEE home address (not employer); question budget is code-authoritative.
+- Eval: 9/9 (100%) live, served at /api/eval and shown in the UI.
+- Secrets set via `wrangler secret put` (from gitignored .dev.vars); secret_guard clean before every push/deploy.
+- Wrote DECISIONS.md and a human README.md.
+- 25 unit tests + live eval all green; tsc clean.
