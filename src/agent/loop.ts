@@ -65,8 +65,8 @@ export async function runTurn(input: TurnInput): Promise<TurnOutput> {
     // No tool calls: coerce plain text into a respond.
     if (toolCalls.length === 0) {
       const text = message.content ?? '';
-      const asks = /\?\s*$/.test(text.trim()) && state.stage === 'collecting' && !state.result;
-      assistant = finalizeRespond(state, tracer, text || 'Sorry, could you say that again?', asks, MAX_QUESTIONS);
+      const counts = countsAsQuestion(state, text, false);
+      assistant = finalizeRespond(state, tracer, text || 'Sorry, could you say that again?', counts);
       break;
     }
 
@@ -94,21 +94,23 @@ export async function runTurn(input: TurnInput): Promise<TurnOutput> {
       messages.push({ role: 'system', content: 'Your respond call was malformed. Call respond again with {message, asksQuestion, stage}.' });
       continue;
     }
-    let { message: text, asksQuestion, stage } = parsed.data;
+    const { message: text, asksQuestion } = parsed.data;
+    // Budget is code-authoritative: count any question while a required slot is
+    // still missing, regardless of what the model self-reports.
+    let counts = countsAsQuestion(state, text, asksQuestion);
 
-    if (asksQuestion && state.questionsAsked >= MAX_QUESTIONS && !budgetForced) {
+    if (counts && state.questionsAsked >= MAX_QUESTIONS && !budgetForced) {
       tracer.guardrail('question_budget', 'block', `attempted question ${state.questionsAsked + 1} of ${MAX_QUESTIONS}`);
       budgetForced = true;
       messages.push({
         role: 'system',
-        content: `QUESTION BUDGET REACHED (${MAX_QUESTIONS}/${MAX_QUESTIONS}). Do not ask another question. Assume Single filing status if still unknown and assume the taxpayer is not claimed as a dependent. Move ahead: call compute_tax, then fill_form, then respond with asksQuestion=false.`,
+        content: `QUESTION BUDGET REACHED (${MAX_QUESTIONS}/${MAX_QUESTIONS}). Do not ask another question. Assume Single filing status if still unknown and assume the taxpayer is not claimed as a dependent. Move ahead: call compute_tax, then fill_form, then respond without asking anything.`,
       });
       continue;
     }
-    if (asksQuestion && budgetForced) asksQuestion = false; // hard override
+    if (counts && budgetForced) counts = false; // hard override — drop the trailing question
 
-    state.stage = stage;
-    assistant = finalizeRespond(state, tracer, text, asksQuestion, MAX_QUESTIONS);
+    assistant = finalizeRespond(state, tracer, text, counts);
     break;
   }
 
@@ -117,21 +119,35 @@ export async function runTurn(input: TurnInput): Promise<TurnOutput> {
     tracer.error('loop', 'no assistant message produced within step budget');
   }
 
+  state.stage = deriveStage(state);
   state.updatedAt = Date.now();
   tracer.event('assistant_message', 'assistant', { detail: assistant.slice(0, 200) });
   return { assistant, state, tracer };
 }
 
-function finalizeRespond(
-  state: SessionState,
-  tracer: Tracer,
-  text: string,
-  asksQuestion: boolean,
-  max: number
-): string {
-  if (asksQuestion && state.questionsAsked < max) {
+/** True while the agent still lacks a required slot (so a '?' is a real ask). */
+function isGathering(state: SessionState): boolean {
+  return state.w2.box1_wages === undefined || state.filingStatus === undefined;
+}
+
+/** Code-authoritative: a question counts if the model flags it OR the message
+ *  contains a '?' while we're still gathering required inputs. */
+function countsAsQuestion(state: SessionState, text: string, modelFlag: boolean): boolean {
+  return modelFlag || (/\?/.test(text) && isGathering(state));
+}
+
+/** Stage is derived from real state, not the model's say-so. */
+function deriveStage(state: SessionState): SessionState['stage'] {
+  if (state.formReady) return 'done';
+  if (state.result) return 'review';
+  if (state.w2.box1_wages !== undefined || state.questionsAsked > 0) return 'collecting';
+  return 'greeting';
+}
+
+function finalizeRespond(state: SessionState, tracer: Tracer, text: string, counts: boolean): string {
+  if (counts && state.questionsAsked < MAX_QUESTIONS) {
     state.questionsAsked += 1;
-    tracer.guardrail('question_budget', 'pass', `question ${state.questionsAsked}/${max}`);
+    tracer.guardrail('question_budget', 'pass', `question ${state.questionsAsked}/${MAX_QUESTIONS}`);
   }
   return text;
 }

@@ -20,15 +20,20 @@ const ENDPOINTS: Record<Route['provider'], string> = {
   openrouter: 'https://openrouter.ai/api/v1/chat/completions',
 };
 
-/** Primary + fallback per role. Swap order automatically if a key is absent. */
+/**
+ * Primary + fallback per role — a real per-role routing decision, visible in
+ * the trace. The conversational loop runs on OpenAI; W-2 vision extraction is
+ * routed to OpenRouter. Either role falls back to the other provider if its
+ * primary is unavailable, and the order auto-swaps if a key is absent.
+ */
 const ROUTES: Record<Role, Route[]> = {
   chat: [
     { provider: 'openai', model: 'gpt-4o-mini' },
     { provider: 'openrouter', model: 'openai/gpt-4o-mini' },
   ],
   vision: [
-    { provider: 'openai', model: 'gpt-4o-mini' },
     { provider: 'openrouter', model: 'openai/gpt-4o-mini' },
+    { provider: 'openai', model: 'gpt-4o-mini' },
   ],
 };
 

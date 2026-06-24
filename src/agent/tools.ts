@@ -136,6 +136,8 @@ const W2_VISION_SYSTEM =
   'You are a precise document reader. Extract these fields from this W-2 image and return ONLY compact JSON ' +
   '(no prose, no code fences): {"employeeName":string,"ssn":string,"employerName":string,"address":string,' +
   '"city":string,"state":string,"zip":string,"box1_wages":number,"box2_federalWithholding":number}. ' +
+  'IMPORTANT: "employeeName" and "address"/"city"/"state"/"zip" are the EMPLOYEE\'s name and HOME address ' +
+  '(box e/f), NOT the employer. "employerName" is the company (box c). ' +
   'Use numbers (not strings) for the money boxes. If a field is missing, use null.';
 
 async function runExtractW2(ctx: ToolContext): Promise<string> {
